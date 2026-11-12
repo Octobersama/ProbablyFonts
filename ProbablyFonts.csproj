@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>ProbablyFonts</AssemblyName>
+    <RootNamespace>ProbablyFonts</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>OctoberSama</Authors>
+    <Copyright>Copyright 2026 OctoberSama</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <GameDirectory Condition="'$(GameDirectory)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Probably Stolen</GameDirectory>
+    <GameManaged>$(GameDirectory)\Probably Stolen_Data\Managed</GameManaged>
+    <OutputPath>build\</OutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="src\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp" HintPath="$(GameManaged)\Assembly-CSharp.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(GameManaged)\0Harmony.dll" Private="false" />
+    <Reference Include="UnityEngine" HintPath="$(GameManaged)\UnityEngine.dll" Private="false" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(GameManaged)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UIModule" HintPath="$(GameManaged)\UnityEngine.UIModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UI" HintPath="$(GameManaged)\UnityEngine.UI.dll" Private="false" />
+    <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(GameManaged)\UnityEngine.TextRenderingModule.dll" Private="false" />
+    <Reference Include="UnityEngine.TextCoreTextEngineModule" HintPath="$(GameManaged)\UnityEngine.TextCoreTextEngineModule.dll" Private="false" />
+    <Reference Include="UnityEngine.TextCoreFontEngineModule" HintPath="$(GameManaged)\UnityEngine.TextCoreFontEngineModule.dll" Private="false" />
+    <Reference Include="Unity.TextMeshPro" HintPath="$(GameManaged)\Unity.TextMeshPro.dll" Private="false" />
+    <Reference Include="Unity.Localization" HintPath="$(GameManaged)\Unity.Localization.dll" Private="false" />
+    <Reference Include="Unity.ResourceManager" HintPath="$(GameManaged)\Unity.ResourceManager.dll" Private="false" />
+  </ItemGroup>
+
+  <Target Name="CheckGameReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(GameManaged)\Assembly-CSharp.dll')" Text="Game assemblies were not found. Set -p:GameDirectory to the Probably Stolen install folder." />
+    <Error Condition="!Exists('$(GameManaged)\Unity.TextMeshPro.dll')" Text="Unity.TextMeshPro.dll was not found under the game's Managed folder." />
+  </Target>
+
+  <Target Name="PackageMod" AfterTargets="Build">
+    <MakeDir Directories="$(MSBuildProjectDirectory)\dist\ProbablyFonts" />
+    <Copy SourceFiles="$(TargetPath);$(MSBuildProjectDirectory)\manifest.xml;$(MSBuildProjectDirectory)\LICENSE;$(MSBuildProjectDirectory)\NOTICE" DestinationFolder="$(MSBuildProjectDirectory)\dist\ProbablyFonts" />
+  </Target>
+</Project>

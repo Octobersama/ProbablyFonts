@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Manifest>
+  <ID>probably_fonts</ID>
+  <Name>ProbablyFonts</Name>
+  <Author>OctoberSama</Author>
+  <ModVersion>0.1.0</ModVersion>
+  <Description>Coherent global TextMesh Pro fallbacks from native game fonts.</Description>
+  <GameVersions>
+    <Version>0.46D</Version>
+    <Version>1.0.0</Version>
+  </GameVersions>
+  <Prerequisites />
+  <Assemblies>
+    <Assembly>ProbablyFonts.dll</Assembly>
+  </Assemblies>
+  <Capabilities />
+</Manifest>
