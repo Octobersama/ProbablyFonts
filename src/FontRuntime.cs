@@ -109,7 +109,7 @@ namespace ProbablyFonts
                     TMP_FontAsset source = filteredGlobalFallbacks[index];
                     try
                     {
-                        FontWeightProfile nativeWeights = ReadWeights(source, source.material);
+                        FontWeightProfile nativeWeights = ReadNativeWeights(source);
                         TMP_FontAsset staticCopy = clones.GetStaticCopy(source, nativeWeights, normalizeSyntheticWeights: false);
                         AddUnique(ownedGlobalAssets, staticCopy);
 
@@ -190,14 +190,8 @@ namespace ProbablyFonts
                 out NativeFontRole role,
                 out TMP_FontAsset roleFont,
                 out bool hasLocalizedRole);
-            Material textMaterial = ReferenceEquals(primaryFont, text.font) ? text.fontSharedMaterial : primaryFont.material;
-            bool useRoleMaterial = hasLocalizedRole && roleFont != null && !primaryIsInline &&
-                                   (textMaterial == null || ReferenceEquals(textMaterial, primaryFont.material));
-            TMP_FontAsset weightFont = useRoleMaterial ? roleFont : primaryFont;
-            Material sourceMaterial = useRoleMaterial ? roleFont.material : textMaterial;
-            FontWeightProfile weights = ReadWeights(weightFont, sourceMaterial);
             TextSelectionCache selection = GetTextSelection(
-                text, input, inputRevision, primaryFont, sourceMaterial, weights, role, roleFont, hasLocalizedRole, primaryIsInline);
+                text, input, inputRevision, primaryFont, role, roleFont, hasLocalizedRole, primaryIsInline);
             ScriptFontFamily family = FontSelection.SelectFamily(FontSelection.Classify(codePoint), selection.Profile);
             TMP_FontAsset selectedFont = selection.GetFont(family);
             if (selectedFont == null) return false;
@@ -246,7 +240,7 @@ namespace ProbablyFonts
             if (codePointArray.Length != uniqueCount) codePointArray = new uint[uniqueCount];
             codePointScratch.CopyTo(codePointArray, 0);
             TMP_FontAsset regularFace = selection.GetFont(family);
-            TMP_FontAsset alternate = clones.GetBoldAlternate(regularFace, selection.Weights.Bold, codePointArray);
+            TMP_FontAsset alternate = clones.GetBoldAlternate(regularFace, ReadNativeWeights(regularFace).Bold, codePointArray);
             selection.SetBoldFont(family, alternate);
             return alternate != null;
         }
@@ -347,8 +341,6 @@ namespace ProbablyFonts
             string input,
             int inputRevision,
             TMP_FontAsset primaryFont,
-            Material sourceMaterial,
-            FontWeightProfile weights,
             NativeFontRole role,
             TMP_FontAsset roleFont,
             bool hasLocalizedRole,
@@ -362,12 +354,12 @@ namespace ProbablyFonts
                 textSelections.Add(text, selection);
             }
 
-            if (selection.Matches(value, inputRevision, primaryFont, sourceMaterial, weights, role, roleFont, hasLocalizedRole, primaryIsInline, generation))
+            if (selection.Matches(value, inputRevision, primaryFont, role, roleFont, hasLocalizedRole, primaryIsInline, generation))
             {
                 return selection;
             }
 
-            selection.SetSource(value, inputRevision, primaryFont, sourceMaterial, weights, generation, primaryIsInline);
+            selection.SetSource(value, inputRevision, primaryFont, generation, primaryIsInline);
             selection.Role = role;
             selection.RoleFont = roleFont;
             selection.HasLocalizedRole = hasLocalizedRole;
@@ -414,12 +406,13 @@ namespace ProbablyFonts
 
                 try
                 {
-                    TMP_FontAsset staticCopy = clones.GetStaticCopy(source, selection.Weights);
+                    FontWeightProfile nativeWeights = ReadNativeWeights(source);
+                    TMP_FontAsset staticCopy = clones.GetStaticCopy(source, nativeWeights);
                     AddUnique(faceCandidateScratch, staticCopy);
                     if (CountCovered(staticCopy, codePointArray) == uniqueCount) break;
                     if (source.sourceFontFile == null) continue;
 
-                    TMP_FontAsset dynamicCopy = clones.GetDynamicCopy(source, selection.Weights);
+                    TMP_FontAsset dynamicCopy = clones.GetDynamicCopy(source, nativeWeights);
                     if (dynamicCopy == null) continue;
                     dynamicCopy.TryAddCharacters(codePointArray, false);
                     AddUnique(faceCandidateScratch, dynamicCopy);
@@ -471,10 +464,11 @@ namespace ProbablyFonts
             fonts.Add(candidate);
         }
 
-        private static FontWeightProfile ReadWeights(TMP_FontAsset primaryFont, Material sourceMaterial)
+        private static FontWeightProfile ReadNativeWeights(TMP_FontAsset font)
         {
-            float normal = primaryFont.normalStyle;
-            float bold = primaryFont.boldStyle;
+            float normal = font.normalStyle;
+            float bold = font.boldStyle;
+            Material sourceMaterial = font.material;
             if (sourceMaterial != null)
             {
                 if (sourceMaterial.HasProperty(ShaderUtilities.ID_WeightNormal))
@@ -539,8 +533,6 @@ namespace ProbablyFonts
             public string Text;
             public int InputRevision;
             public TMP_FontAsset PrimaryFont;
-            public Material SourceMaterial;
-            public FontWeightProfile Weights;
             public int Generation;
             public NativeFontRole Role;
             public TMP_FontAsset RoleFont;
@@ -561,8 +553,6 @@ namespace ProbablyFonts
                 string text,
                 int inputRevision,
                 TMP_FontAsset primaryFont,
-                Material sourceMaterial,
-                FontWeightProfile weights,
                 NativeFontRole role,
                 TMP_FontAsset roleFont,
                 bool hasLocalizedRole,
@@ -570,26 +560,21 @@ namespace ProbablyFonts
                 int generation)
             {
                 return ReferenceEquals(Text, text) && InputRevision == inputRevision &&
-                       ReferenceEquals(PrimaryFont, primaryFont) && ReferenceEquals(SourceMaterial, sourceMaterial) &&
+                       ReferenceEquals(PrimaryFont, primaryFont) &&
                        Role == role && ReferenceEquals(RoleFont, roleFont) && HasLocalizedRole == hasLocalizedRole &&
-                       PrimaryIsInline == primaryIsInline && Generation == generation &&
-                       Weights.Normal.Equals(weights.Normal) && Weights.Bold.Equals(weights.Bold);
+                       PrimaryIsInline == primaryIsInline && Generation == generation;
             }
 
             public void SetSource(
                 string text,
                 int inputRevision,
                 TMP_FontAsset primaryFont,
-                Material sourceMaterial,
-                FontWeightProfile weights,
                 int generation,
                 bool primaryIsInline)
             {
                 Text = text;
                 InputRevision = inputRevision;
                 PrimaryFont = primaryFont;
-                SourceMaterial = sourceMaterial;
-                Weights = weights;
                 Generation = generation;
                 PrimaryIsInline = primaryIsInline;
                 Chinese = null;

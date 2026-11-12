@@ -118,6 +118,7 @@ namespace ProbablyFonts
                 return null;
             }
 
+            CopyFaceDilation(source.material, copy.material);
             if (normalizeSyntheticWeights)
             {
                 NormalizeWeight(copy, copy.material, weights);
@@ -233,7 +234,7 @@ namespace ProbablyFonts
             {
                 if (entry.SourceCrc != sourceCrc)
                 {
-                    TMP_MaterialManager.CopyMaterialPresetProperties(sourceMaterial, entry.Material);
+                    MatchAppearance(sourceMaterial, targetMaterial, entry.Material);
                     entry.SourceCrc = sourceCrc;
                 }
 
@@ -251,13 +252,31 @@ namespace ProbablyFonts
                 copy.SetTexture(ShaderUtilities.ID_MainTex, targetTexture);
             }
 
-            TMP_MaterialManager.CopyMaterialPresetProperties(sourceMaterial, copy);
+            MatchAppearance(sourceMaterial, targetMaterial, copy);
             fallbackMaterials.Add(key, new FallbackMaterialEntry(copy, sourceCrc));
             ownedMaterials.Add(copy);
             ownedMaterialSet.Add(copy);
             fallbackMaterial = copy;
             return true;
         }
+
+        private static void MatchAppearance(Material source, Material nativeTarget, Material matched)
+        {
+            TMP_MaterialManager.CopyMaterialPresetProperties(source, matched);
+            // Face dilation belongs to the glyph atlas, not to the surrounding Latin text.
+            CopyFaceDilation(nativeTarget, matched);
+            ShaderUtilities.UpdateShaderRatios(matched);
+        }
+
+        private static void CopyFaceDilation(Material source, Material target)
+        {
+            if (source != null && source.HasProperty(ShaderUtilities.ID_FaceDilate) &&
+                target.HasProperty(ShaderUtilities.ID_FaceDilate))
+            {
+                target.SetFloat(ShaderUtilities.ID_FaceDilate, source.GetFloat(ShaderUtilities.ID_FaceDilate));
+            }
+        }
+
         public TMP_FontAsset GetBoldAlternate(TMP_FontAsset regularFace, float boldWeight, uint[] codePoints)
         {
             if (regularFace == null || codePoints == null || codePoints.Length == 0) return null;
@@ -327,6 +346,8 @@ namespace ProbablyFonts
             {
                 material.SetFloat(ShaderUtilities.ID_WeightBold, weights.Bold);
             }
+
+            ShaderUtilities.UpdateShaderRatios(material);
         }
         private static void CopyNativeWeights(TMP_FontAsset copy, TMP_FontAsset source)
         {
