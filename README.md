@@ -1,66 +1,50 @@
 # ProbablyFonts
+版本 1.0.0 · 作者 OctoberSama
 
-为《深空当铺：可能是偷的》（Probably Stolen）补充跨语言的 TextMesh Pro 字体回退。使用游戏已有字体，让中文、日文等文字不再依赖当前游戏语言才有机会显示，同时尽量保留正文、标题、手写和科幻字体各自的风格。
+为《深空当铺：可能是偷的》（Probably Stolen）补齐跨语言的 TextMesh Pro 字体回退，改善切换游戏语言后其他语言文字缺字和粗细混杂的问题。使用游戏自带字体，不包含或下载外部字体，不修改翻译或游戏语言，也没有单独的设置界面。
 
-ProbablyFonts 是独立模组，不依赖 ProbablyEdited，也不包含游戏字体或游戏程序集。
+![游戏界面中的字体显示示例](docs/assets/font-preview.png)
 
-## 安装与停用
+截图展示英语游戏界面中正常显示的中文与母语语言名称；其中的语言选项由 ProbablyEdited 注册，ProbablyFonts 本身没有单独的设置页。
 
-1. 将构建得到的 `dist/ProbablyFonts/` 整个文件夹复制到游戏的 `Mods/` 中。
-2. 在游戏模组列表中启用 **ProbablyFonts**，然后重启游戏。
-3. 在游戏原有语言菜单中切换语言即可；本模组没有额外语言选项，不修改翻译或游戏语言设置。
-4. 停用时在模组列表中关闭并重启。模组不保存存档数据或偏好；停用会移除自己的回退项，并释放自己创建的字体和材质。
+## 安装
 
-**首次使用建议先停用 Chinese Font Fix／中文字体补丁等其他全局字体模组。** 多个模组同时更改全局回退、字形选择或 `FontLoader` 字体时，结果取决于它们的执行顺序。ProbablyFonts 不会自动关闭其他模组；需要对比时一次只启用一个字体模组。
+1. 将构建产物中的整个 `dist/ProbablyFonts/` 文件夹复制到游戏 `Mods/` 目录。
+2. 在游戏模组列表启用 **ProbablyFonts** 并重启游戏；之后使用游戏原有的语言选项即可。
+3. 如果安装 [ProbablyEdited](https://github.com/Octobersama/ProbablyEdited)，请先安装并启用本模组，再启用 ProbablyEdited。清单依赖由原生模组加载器仅作缺失提示，不会自动拦截运行；Steam 也不会自动订阅或安装项目依赖。
 
-## 字体选择
+其他会修改全局字体回退的模组可能互相影响。首次使用时建议停用其他全局字体模组；需要比较时一次只启用一个。
 
-- 保留文本原有的主字体、字号、样式和富文本语义，在全局回退表中补充游戏已有字体的独立副本；不覆盖其他模组已有回退项的顺序。
-- 对同一段文字的 CJK 字符组，优先选择能覆盖整组字符的原生角色字体。角色字体只有部分字形时，尝试用一个完整的原生脚本字体覆盖整组，避免同一词中交替使用粗细不同的字体。
-- 有假名时选择日文字形，有谚文时选择韩文字形，注音符号使用中文字形。混合文字中的汉字跟随数量更多的假名／谚文；数量相同或只有汉字时，固定选择中文，不随游戏语言来回切换。**只有汉字的日文无法据此辨别，可能显示中文区域字形。** 这不向游戏或 ProbablyEdited 的语言菜单添加任何语言。
-- 保留原生角色对应的手写、正文和显示字体。CJK 副本保留所选 CJK 字体自己的正常／粗体字重和笔画扩张参数（Face Dilate），不直接套用周围西文字体的数值；颜色、描边等外观继续匹配原控件。粗体和斜体请求仍按文本样式处理，不同字族本身的轮廓仍可能存在差别。
-- 原生静态字库覆盖不足时，仅在游戏字体仍有可用源字体的情况下，为当前文字需要的字符创建动态字形；不预先生成整个 Unicode 字符集，不修改游戏字体资产。
-
-如果游戏提供的字体仍不能完整覆盖某个字符组，模组会记录警告，并让该组继续使用 TMP 原来的回退路径。它不会下载字体、替换文字或伪造字形。
-
-模组在自己的资源加载完成事件之后等待字体和本地化就绪，场景／语言变化时重新协调回退项。已有文本会刷新，新创建的控件、下拉菜单和后续文本修改走同一个选字路径；没有每帧扫描整个场景。
+停用后重启即可恢复原有字体回退行为。本模组不保存游戏进度或个人预设。
 
 ## 构建
 
-需要 .NET SDK 和本机安装的游戏。模组目标为 `netstandard2.1`，纯逻辑检查使用 .NET 10；不下载额外测试框架。
+需要 .NET SDK 和本机安装的游戏；编译引用游戏程序集，但不会将这些程序集复制进模组包。模组目标为 `netstandard2.1`，纯逻辑检查项目使用 .NET 10。构建会生成 `dist/ProbablyFonts/`。
 
 ```powershell
 dotnet build ProbablyFonts.csproj -c Release
 dotnet run --project tests/ProbablyFonts.PureChecks -c Release
 ```
 
-游戏不在默认位置时：
+游戏安装在非默认位置时，指定 `GameDirectory`：
 
 ```powershell
 dotnet build ProbablyFonts.csproj -c Release -p:GameDirectory="D:\SteamLibrary\steamapps\common\Probably Stolen"
 ```
 
-构建自动生成 `dist/ProbablyFonts/`，只包含 `ProbablyFonts.dll`、`manifest.xml`、`LICENSE`、`NOTICE`。游戏程序集仅作为编译引用，不会被复制进安装包。源码、构建和检查均不引用父目录，可以把整个项目目录移到其他位置独立管理。
+GitHub Actions 会在 push、pull request 和手动运行时通过 .NET 10 的 `dotnet run` 执行 `ProbablyFonts.PureChecks`，并在成功或失败后上传名为 `ProbablyFonts-console-check-results` 的诊断产物，包含逐项 `.log` 文本日志和 `summary.txt`；它不是模组包。完整模组包仍须在安装了游戏的本机使用上述命令构建。
 
-## 兼容性与实现边界
+提交信息含 `[skip ci]`、`[ci skip]`、`[no ci]`、`[skip actions]` 或 `[actions skip]` 时，GitHub 会跳过对应的自动工作流；手动运行不受这些标记影响。
 
-- manifest 声明 `0.46D` 和 `1.0.0`：前者对应本机 `100-Rev13` 客户端的 `Application.version`，后者对应官方为 `100-Rev14` 说明的 `1.0.0.*` 版本前缀。版本声明不能代替对应客户端的运行验证。
-- 使用游戏加载器应用 Harmony 补丁，不另建 Harmony 实例或卸载其他模组的补丁。
-- 补丁目标是明确列出的 TMP 字形选择、输入缓冲及材质方法。输入快照覆盖字符串、字符数组、`StringBuilder` 和数字格式化输入，不在每个字形查询时重新读取整段文本。
-- 当前官方扫描规则豁免字面量指向 `TMPro`／Unity UI 类型的 Harmony 目标；manifest 不申请额外能力。模组不联网、不访问用户文件、不加载外部字体。
-- TMP 内部方法或游戏的字体结构更新后可能需要适配。官方指南将修改现有内置 UI 列为不受支持的扩展，并要求作者自行承担 Harmony 补丁兼容性。发布或升级前应在目标游戏版本中检查 `mod-scan probably_fonts` 结果和实际界面。
-- 静态检查与纯逻辑测试不能验证实际字形、材质渲染、缺字和光学字重；首次安装后应检查不同游戏语言下的中日文混排、下拉菜单、正文和标题。
+源码：[ProbablyFonts](https://github.com/Octobersama/ProbablyFonts)。
 
-## 参考资料
+## 字体行为与边界
 
-查阅日期：2026-11-12。
-
-- Probably Stolen [Modding Guide](https://github.com/dragonpan2/probably-stolen-modding/blob/main/ModdingGuide.md)：[资源就绪](https://github.com/dragonpan2/probably-stolen-modding/blob/main/ModdingGuide.md#knowing-when-your-assets-are-ready)、[Harmony 与 TMP/UI 扫描规则](https://github.com/dragonpan2/probably-stolen-modding/blob/main/ModdingGuide.md#harmony-patches)、[支持范围](https://github.com/dragonpan2/probably-stolen-modding/blob/main/ModdingGuide.md#supported--unsupported-modding-features)。
-- Probably Stolen [APIChanges](https://raw.githubusercontent.com/dragonpan2/probably-stolen-modding/main/APIChanges.md)、[Code of Conduct](https://github.com/dragonpan2/probably-stolen-modding/blob/main/CodeOfConduct.md)。
-- Unity TMP：[回退链](https://github.com/Unity-Technologies/uGUI/blob/main/com.unity.ugui/Documentation~/TextMeshPro/FontAssetsFallback.md)、[字体字重](https://github.com/Unity-Technologies/uGUI/blob/main/com.unity.ugui/Documentation~/TextMeshPro/FontAssetsProperties.md)、[回退材质匹配](https://github.com/Unity-Technologies/uGUI/blob/main/com.unity.ugui/Documentation~/TextMeshPro/Settings.md)、[动态字体](https://github.com/Unity-Technologies/uGUI/blob/main/com.unity.ugui/Documentation~/TextMeshPro/exportdoc.md)。
-- Harmony：[参数注入](https://github.com/pardeike/Harmony/blob/master/Documentation/articles/patching-injections.md)、[Prefix](https://harmony.pardeike.net/articles/patching-prefix.html)。
-- Unity：[SceneManager.sceneLoaded](https://docs.unity.com/en-us/engine/6000.6/script-reference/unityengine/scenemanagement/scenemanager/sceneloaded)。
+- 保留控件原有主字体和样式，并以游戏自带字体补充缺失字形；文字颜色、描边等外观仍由原控件决定。
+- 有假名时优先使用日文字形，有谚文时使用韩文字形，注音符号使用中文字形。只有汉字时无法可靠判断中文或日文地区字形，会采用中文字形。
+- 如果游戏字体无法提供所需字形，会记录警告并交回 TextMesh Pro 原有回退链；不会替换文字或伪造字形。
+- 本模组通过 Harmony 适配游戏的 TextMesh Pro 字体处理。`manifest.xml` 当前声明游戏版本 `0.46D` 和 `1.0.0`；这些声明不保证所有客户端构建都兼容。游戏更新可能改变内部方法或字体结构，更新后应在目标客户端检查实际字形和界面。
 
 ## 许可证
 
-Copyright 2026 OctoberSama。源码与文档采用 [Apache License 2.0](LICENSE)，署名见 [NOTICE](NOTICE)。许可证不授予游戏或其他第三方字体资产的再分发权。
+Copyright © 2026 OctoberSama。项目代码、文档和原创封面采用 [Apache License 2.0](LICENSE)，署名见 [NOTICE](NOTICE)。演示截图中的原游戏内容及游戏字体仍属于原权利人，本项目许可不授予这些资产的再分发权。
