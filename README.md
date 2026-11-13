@@ -6,6 +6,8 @@
 
 修复《深空当铺：可能是偷的》（Probably Stolen）中选择非CJK语言时/Debug控制台的CJK文字显示问题。
 
+本模组独立运行，不需要安装 ProbablyEdited。
+
 ----
 ## 效果演示
 

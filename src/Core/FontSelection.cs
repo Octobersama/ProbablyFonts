@@ -68,6 +68,108 @@ namespace ProbablyFonts.Core
                               BopomofoCount != 0 || CommonCjkCount != 0;
     }
 
+    internal sealed class TextFamilyAnalysis
+    {
+        public static readonly TextFamilyAnalysis Empty =
+            new TextFamilyAnalysis(0, Array.Empty<uint>(), Array.Empty<int>());
+
+        public readonly int TotalCharacters;
+        public readonly uint[] CodePoints;
+        public readonly int[] CharacterCounts;
+
+        public TextFamilyAnalysis(int totalCharacters, uint[] codePoints, int[] characterCounts)
+        {
+            TotalCharacters = totalCharacters;
+            CodePoints = codePoints;
+            CharacterCounts = characterCounts;
+        }
+    }
+
+    internal sealed class TextScriptAnalysis
+    {
+        public readonly TextScriptProfile Profile;
+        private readonly TextFamilyAnalysis chinese;
+        private readonly TextFamilyAnalysis japanese;
+        private readonly TextFamilyAnalysis korean;
+
+        public TextScriptAnalysis(
+            TextScriptProfile profile,
+            TextFamilyAnalysis chinese,
+            TextFamilyAnalysis japanese,
+            TextFamilyAnalysis korean)
+        {
+            Profile = profile;
+            this.chinese = chinese;
+            this.japanese = japanese;
+            this.korean = korean;
+        }
+
+        public TextFamilyAnalysis GetFamily(ScriptFontFamily family)
+        {
+            switch (family)
+            {
+                case ScriptFontFamily.Chinese: return chinese;
+                case ScriptFontFamily.Japanese: return japanese;
+                case ScriptFontFamily.Korean: return korean;
+                default: return TextFamilyAnalysis.Empty;
+            }
+        }
+    }
+
+    internal sealed class RevisionedTextSelectionCache<TContext, TSelection>
+        where TSelection : class
+    {
+        private readonly List<ContextSelection> selections = new List<ContextSelection>(2);
+        private TextScriptAnalysis analysis;
+        private int revision;
+        private int generation;
+        private bool hasAnalysis;
+
+        public TSelection Get(
+            string input,
+            int inputRevision,
+            int currentGeneration,
+            TContext context,
+            Func<string, TextScriptAnalysis> analyze,
+            Func<TextScriptAnalysis, TContext, TSelection> select)
+        {
+            if (!hasAnalysis || revision != inputRevision || generation != currentGeneration)
+            {
+                TextScriptAnalysis nextAnalysis = analyze(input);
+                analysis = nextAnalysis;
+                revision = inputRevision;
+                generation = currentGeneration;
+                selections.Clear();
+                hasAnalysis = true;
+            }
+
+            for (int index = 0; index < selections.Count; index++)
+            {
+                ContextSelection existing = selections[index];
+                if (EqualityComparer<TContext>.Default.Equals(existing.Context, context))
+                {
+                    return existing.Selection;
+                }
+            }
+
+            TSelection selection = select(analysis, context);
+            selections.Add(new ContextSelection(context, selection));
+            return selection;
+        }
+
+        private readonly struct ContextSelection
+        {
+            public readonly TContext Context;
+            public readonly TSelection Selection;
+
+            public ContextSelection(TContext context, TSelection selection)
+            {
+                Context = context;
+                Selection = selection;
+            }
+        }
+    }
+
     internal readonly struct FontWeightProfile
     {
         public readonly float Normal;
@@ -186,92 +288,83 @@ namespace ProbablyFonts.Core
             return RoleFace.Standard;
         }
 
-        public static T SelectCompleteCandidate<T>(
-            string text,
-            TextScriptProfile profile,
-            ScriptFontFamily family,
-            IList<T> candidates,
-            Func<T, int, bool> hasCharacter,
-            out int totalCharacters,
-            out int bestCoverage) where T : class
+        public static TextScriptAnalysis AnalyzeText(string text)
         {
-            totalCharacters = CountFamilyCharacters(text, profile, family);
-            bestCoverage = 0;
-            if (totalCharacters == 0 || candidates == null || candidates.Count == 0)
+            string value = text ?? string.Empty;
+            TextScriptProfile profile = Analyze(value);
+            var frequencies = new Dictionary<uint, int>();
+            var chineseCodePoints = new List<uint>();
+            var japaneseCodePoints = new List<uint>();
+            var koreanCodePoints = new List<uint>();
+            int chineseCharacters = 0;
+            int japaneseCharacters = 0;
+            int koreanCharacters = 0;
+
+            for (int index = 0; index < value.Length; index++)
             {
-                return null;
-            }
-
-            for (int candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
-            {
-                T candidate = candidates[candidateIndex];
-                if (candidate == null) continue;
-
-                int coverage = CountFamilyCharacters(text, profile, family, candidate, hasCharacter);
-                if (coverage > bestCoverage) bestCoverage = coverage;
-                if (coverage == totalCharacters) return candidate;
-            }
-
-            return null;
-        }
-
-        public static int CollectFamilyCodePoints(
-            string text,
-            TextScriptProfile profile,
-            ScriptFontFamily family,
-            List<uint> output)
-        {
-            if (output == null) throw new ArgumentNullException(nameof(output));
-            output.Clear();
-            if (string.IsNullOrEmpty(text)) return 0;
-
-            for (int index = 0; index < text.Length; index++)
-            {
-                uint codePoint = text[index];
-                if (char.IsHighSurrogate(text[index]) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
+                uint codePoint = value[index];
+                if (char.IsHighSurrogate(value[index]) && index + 1 < value.Length && char.IsLowSurrogate(value[index + 1]))
                 {
-                    codePoint = (uint)char.ConvertToUtf32(text[index], text[++index]);
+                    codePoint = (uint)char.ConvertToUtf32(value[index], value[++index]);
                 }
 
                 ScriptKind kind = Classify(codePoint);
-                if (IsCjk(kind) && SelectFamily(kind, profile) == family && !output.Contains(codePoint))
+                if (!IsCjk(kind)) continue;
+
+                switch (SelectFamily(kind, profile))
                 {
-                    output.Add(codePoint);
+                    case ScriptFontFamily.Chinese:
+                        chineseCharacters++;
+                        RecordCodePoint(codePoint, chineseCodePoints, frequencies);
+                        break;
+                    case ScriptFontFamily.Japanese:
+                        japaneseCharacters++;
+                        RecordCodePoint(codePoint, japaneseCodePoints, frequencies);
+                        break;
+                    case ScriptFontFamily.Korean:
+                        koreanCharacters++;
+                        RecordCodePoint(codePoint, koreanCodePoints, frequencies);
+                        break;
                 }
             }
 
-            return output.Count;
+            return new TextScriptAnalysis(
+                profile,
+                CreateFamilyAnalysis(chineseCodePoints, chineseCharacters, frequencies),
+                CreateFamilyAnalysis(japaneseCodePoints, japaneseCharacters, frequencies),
+                CreateFamilyAnalysis(koreanCodePoints, koreanCharacters, frequencies));
         }
 
-        public static int CountFamilyCharacters(string text, TextScriptProfile profile, ScriptFontFamily family)
+        private static void RecordCodePoint(uint codePoint, List<uint> output, Dictionary<uint, int> frequencies)
         {
-            return CountFamilyCharacters<object>(text, profile, family, null, null);
-        }
-
-        private static int CountFamilyCharacters<T>(
-            string text,
-            TextScriptProfile profile,
-            ScriptFontFamily family,
-            T candidate,
-            Func<T, int, bool> hasCharacter)
-        {
-            if (string.IsNullOrEmpty(text)) return 0;
-
-            int count = 0;
-            for (int index = 0; index < text.Length; index++)
+            if (frequencies.TryGetValue(codePoint, out int count))
             {
-                uint codePoint = text[index];
-                if (char.IsHighSurrogate(text[index]) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
-                {
-                    codePoint = (uint)char.ConvertToUtf32(text[index], text[++index]);
-                }
-
-                ScriptKind kind = Classify(codePoint);
-                if (!IsCjk(kind) || SelectFamily(kind, profile) != family) continue;
-                if (hasCharacter == null || hasCharacter(candidate, (int)codePoint)) count++;
+                frequencies[codePoint] = count + 1;
+                return;
             }
 
-            return count;
+            frequencies.Add(codePoint, 1);
+            output.Add(codePoint);
+        }
+
+        private static TextFamilyAnalysis CreateFamilyAnalysis(
+            List<uint> codePoints,
+            int totalCharacters,
+            Dictionary<uint, int> frequencies)
+        {
+            if (codePoints.Count == 0)
+            {
+                return TextFamilyAnalysis.Empty;
+            }
+
+            uint[] uniqueCodePoints = codePoints.ToArray();
+            int[] characterCounts = new int[uniqueCodePoints.Length];
+            for (int index = 0; index < uniqueCodePoints.Length; index++)
+            {
+                characterCounts[index] = frequencies[uniqueCodePoints[index]];
+            }
+
+            return new TextFamilyAnalysis(totalCharacters, uniqueCodePoints, characterCounts);
         }
 
         private static bool IsCjk(ScriptKind kind)
@@ -330,6 +423,43 @@ namespace ProbablyFonts.Core
         private static bool InRange(uint value, uint minimum, uint maximum)
         {
             return value >= minimum && value <= maximum;
+        }
+    }
+
+    internal struct CompleteCandidateSelector<T> where T : class
+    {
+        private readonly TextFamilyAnalysis family;
+        private readonly Func<T, int, bool> hasCharacter;
+
+        public T Selected { get; private set; }
+        public int TotalCharacters => family.TotalCharacters;
+        public int BestCoverage { get; private set; }
+
+        public CompleteCandidateSelector(TextFamilyAnalysis family, Func<T, int, bool> hasCharacter)
+        {
+            this.family = family;
+            this.hasCharacter = hasCharacter;
+        }
+
+        public bool Consider(T candidate)
+        {
+            if (Selected != null) return true;
+            if (candidate == null || TotalCharacters == 0) return false;
+
+            int coverage = 0;
+            for (int index = 0; index < family.CodePoints.Length; index++)
+            {
+                if (hasCharacter(candidate, (int)family.CodePoints[index]))
+                {
+                    coverage += family.CharacterCounts[index];
+                }
+            }
+
+            if (coverage > BestCoverage) BestCoverage = coverage;
+            if (coverage != TotalCharacters) return false;
+
+            Selected = candidate;
+            return true;
         }
     }
 }

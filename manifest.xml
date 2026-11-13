@@ -3,7 +3,7 @@
   <ID>probably_fonts</ID>
   <Name>ProbablyFonts</Name>
   <Author>OctoberSama</Author>
-  <ModVersion>1.0.0</ModVersion>
+  <ModVersion>1.0.1</ModVersion>
   <Description>Coherent global TextMesh Pro fallbacks from native game fonts.</Description>
   <GameVersions>
     <Version>0.46D</Version>

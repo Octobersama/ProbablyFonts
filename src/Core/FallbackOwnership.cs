@@ -128,9 +128,11 @@ namespace ProbablyFonts.Core
 
     internal sealed class OwnedListEntries<T> where T : class
     {
-        private readonly List<T> entries = new List<T>();
+        private readonly List<T> ownedEntries = new List<T>();
+        private readonly List<T> mountedEntries = new List<T>();
+        private readonly List<List<T>> targets = new List<List<T>>();
 
-        public int Count => entries.Count;
+        public int Count => ownedEntries.Count;
 
         public void AddMissing(List<T> target, IEnumerable<T> candidates)
         {
@@ -138,46 +140,82 @@ namespace ProbablyFonts.Core
 
             foreach (T candidate in candidates)
             {
-                if (candidate == null || ContainsReference(target, candidate) || ContainsReference(entries, candidate))
-                {
-                    continue;
-                }
-
-                target.Add(candidate);
-                entries.Add(candidate);
+                if (candidate == null) continue;
+                bool owned = ContainsReference(ownedEntries, candidate);
+                bool present = ContainsReference(target, candidate);
+                if (!owned && present) continue;
+                if (!owned) ownedEntries.Add(candidate);
+                if (!ContainsReference(mountedEntries, candidate)) mountedEntries.Add(candidate);
+                Track(target);
+                if (!present) target.Add(candidate);
             }
         }
 
         public bool HasMissingFrom(List<T> target)
         {
-            if (entries.Count == 0) return false;
+            if (mountedEntries.Count == 0) return false;
             if (target == null) return true;
 
-            for (int entryIndex = 0; entryIndex < entries.Count; entryIndex++)
+            for (int entryIndex = 0; entryIndex < mountedEntries.Count; entryIndex++)
             {
-                if (!ContainsReference(target, entries[entryIndex])) return true;
+                if (!ContainsReference(target, mountedEntries[entryIndex])) return true;
             }
 
             return false;
         }
 
-        public void Restore(List<T> target)
+        public void Unmount(List<T> target, List<T> currentTarget = null)
         {
-            if (target != null)
+            if (ownedEntries.Count != 0)
             {
-                for (int entryIndex = entries.Count - 1; entryIndex >= 0; entryIndex--)
-                {
-                    T owned = entries[entryIndex];
-                    for (int listIndex = target.Count - 1; listIndex >= 0; listIndex--)
-                    {
-                        if (!ReferenceEquals(target[listIndex], owned)) continue;
-                        target.RemoveAt(listIndex);
-                        break;
-                    }
-                }
+                Track(target);
+                Track(currentTarget);
             }
 
-            entries.Clear();
+            RemoveOwnedReferences(target);
+            if (!ReferenceEquals(target, currentTarget)) RemoveOwnedReferences(currentTarget);
+
+            for (int index = 0; index < targets.Count; index++)
+            {
+                List<T> mountedTarget = targets[index];
+                if (ReferenceEquals(mountedTarget, target) || ReferenceEquals(mountedTarget, currentTarget)) continue;
+                RemoveOwnedReferences(mountedTarget);
+            }
+
+            mountedEntries.Clear();
+        }
+
+        public void Restore(List<T> target, List<T> currentTarget = null)
+        {
+            Unmount(target, currentTarget);
+            ownedEntries.Clear();
+            targets.Clear();
+        }
+
+        private void Track(List<T> target)
+        {
+            if (target == null) return;
+
+            for (int index = 0; index < targets.Count; index++)
+            {
+                if (ReferenceEquals(targets[index], target)) return;
+            }
+
+            targets.Add(target);
+        }
+
+        private void RemoveOwnedReferences(List<T> target)
+        {
+            if (target == null) return;
+
+            for (int entryIndex = ownedEntries.Count - 1; entryIndex >= 0; entryIndex--)
+            {
+                T owned = ownedEntries[entryIndex];
+                for (int listIndex = target.Count - 1; listIndex >= 0; listIndex--)
+                {
+                    if (ReferenceEquals(target[listIndex], owned)) target.RemoveAt(listIndex);
+                }
+            }
         }
 
         private static bool ContainsReference(List<T> list, T value)

@@ -18,18 +18,22 @@ namespace ProbablyFonts
         private static readonly List<TMP_FontAsset> filteredGlobalFallbacks = new List<TMP_FontAsset>(8);
         private static readonly List<TMP_FontAsset> ownedGlobalAssets = new List<TMP_FontAsset>(8);
         private static readonly List<TMP_FontAsset> nativeCandidateScratch = new List<TMP_FontAsset>(8);
-        private static readonly List<TMP_FontAsset> faceCandidateScratch = new List<TMP_FontAsset>(16);
-        private static readonly List<uint> codePointScratch = new List<uint>(16);
         private static readonly HashSet<TMP_FontAsset> warnedAssets = new HashSet<TMP_FontAsset>(ReferenceEqualityComparer<TMP_FontAsset>.Instance);
         private static readonly bool[] warnedIncompleteBoldFace = new bool[9];
         private static readonly bool[] warnedIncompleteFace = new bool[9];
         private static readonly Func<TMP_FontAsset, int, bool> hasCharacter = HasCharacter;
         private static readonly Func<TMP_FontAsset, IEnumerable<TMP_FontAsset>> getFallbacks = GetFallbacks;
         private static readonly IEqualityComparer<TMP_FontAsset> fontComparer = ReferenceEqualityComparer<TMP_FontAsset>.Instance;
-
-        private static ConditionalWeakTable<TMP_Text, TextSelectionCache> textSelections =
-            new ConditionalWeakTable<TMP_Text, TextSelectionCache>();
-        private static uint[] codePointArray = Array.Empty<uint>();
+        private static readonly Func<string, TextScriptAnalysis> analyzeText = FontSelection.AnalyzeText;
+        private static readonly Func<TextScriptAnalysis, FontSelectionContext, TextSelectionCache> selectTextContext = SelectTextContext;
+        private static readonly ConditionalWeakTable<
+            TMP_Text,
+            RevisionedTextSelectionCache<FontSelectionContext, TextSelectionCache>
+        >.CreateValueCallback createTextCache = CreateTextCache;
+        private static ConditionalWeakTable<
+            TMP_Text,
+            RevisionedTextSelectionCache<FontSelectionContext, TextSelectionCache>
+        > textSelections = CreateTextSelections();
         private static FontCloneStore clones = new FontCloneStore();
         private static FontLoader fontLoader;
         private static Locale locale;
@@ -58,7 +62,8 @@ namespace ProbablyFonts
         {
             ready = false;
             generation++;
-            ownedGlobalFallbacks.Restore(globalFallbackList);
+            TMP_Settings currentSettings = TMP_Settings.GetSettings();
+            ownedGlobalFallbacks.Unmount(globalFallbackList, GetGlobalFallbackList(currentSettings));
             RefreshExistingText();
             globalFallbackList = null;
             ownedGlobalAssets.Clear();
@@ -66,7 +71,7 @@ namespace ProbablyFonts
             locale = null;
             tmpSettings = null;
             catalog = null;
-            textSelections = new ConditionalWeakTable<TMP_Text, TextSelectionCache>();
+            textSelections = CreateTextSelections();
         }
 
         public static void Reconcile(
@@ -82,14 +87,15 @@ namespace ProbablyFonts
                 return;
             }
 
-            ownedGlobalFallbacks.Restore(globalFallbackList);
-            globalFallbackList = TMP_Settings.fallbackFontAssets;
+            List<TMP_FontAsset> currentFallbackList = GetGlobalFallbackList(settings);
+            ownedGlobalFallbacks.Unmount(globalFallbackList, currentFallbackList);
+            globalFallbackList = currentFallbackList;
             fontLoader = loader;
             locale = selectedLocale;
             tmpSettings = settings;
             catalog = new NativeFontCatalog(loader);
             generation++;
-            textSelections = new ConditionalWeakTable<TMP_Text, TextSelectionCache>();
+            textSelections = CreateTextSelections();
 
             proposedGlobalFallbacks.Clear();
             filteredGlobalFallbacks.Clear();
@@ -138,21 +144,19 @@ namespace ProbablyFonts
         {
             active = false;
             ready = false;
-            ownedGlobalFallbacks.Restore(globalFallbackList);
+            TMP_Settings currentSettings = TMP_Settings.GetSettings();
+            ownedGlobalFallbacks.Restore(globalFallbackList, GetGlobalFallbackList(currentSettings));
+            textSelections = CreateTextSelections();
             RefreshExistingText();
-            clones.Release();
             FontInputSnapshots.Stop();
-            textSelections = new ConditionalWeakTable<TMP_Text, TextSelectionCache>();
+            clones.Release();
             proposedGlobalFallbacks.Clear();
             ownedGlobalAssets.Clear();
             filteredGlobalFallbacks.Clear();
             nativeCandidateScratch.Clear();
-            faceCandidateScratch.Clear();
-            codePointScratch.Clear();
             warnedAssets.Clear();
             Array.Clear(warnedIncompleteFace, 0, warnedIncompleteFace.Length);
             Array.Clear(warnedIncompleteBoldFace, 0, warnedIncompleteBoldFace.Length);
-            codePointArray = Array.Empty<uint>();
             globalFallbackList = null;
             fontLoader = null;
             locale = null;
@@ -225,22 +229,18 @@ namespace ProbablyFonts
         {
             if (selection.IsBoldPrepared(family)) return selection.GetBoldFont(family) != null;
 
-            codePointScratch.Clear();
-            int uniqueCount = FontSelection.CollectFamilyCodePoints(
-                selection.Text,
-                selection.Profile,
-                family,
-                codePointScratch);
-            if (uniqueCount == 0)
+            TextFamilyAnalysis familyAnalysis = selection.Analysis.GetFamily(family);
+            if (familyAnalysis.TotalCharacters == 0)
             {
                 selection.SetBoldFont(family, null);
                 return false;
             }
 
-            if (codePointArray.Length != uniqueCount) codePointArray = new uint[uniqueCount];
-            codePointScratch.CopyTo(codePointArray, 0);
             TMP_FontAsset regularFace = selection.GetFont(family);
-            TMP_FontAsset alternate = clones.GetBoldAlternate(regularFace, ReadNativeWeights(regularFace).Bold, codePointArray);
+            TMP_FontAsset alternate = clones.GetBoldAlternate(
+                regularFace,
+                ReadNativeWeights(regularFace).Bold,
+                familyAnalysis.CodePoints);
             selection.SetBoldFont(family, alternate);
             return alternate != null;
         }
@@ -295,6 +295,12 @@ namespace ProbablyFonts
                 QueueMeshRefresh();
             }
         }
+
+        private static List<TMP_FontAsset> GetGlobalFallbackList(TMP_Settings settings)
+        {
+            return settings == null ? null : TMP_Settings.fallbackFontAssets;
+        }
+
         public static void QueueMeshRefresh()
         {
             if (!active || !ready || refreshQueued) return;
@@ -346,24 +352,35 @@ namespace ProbablyFonts
             bool hasLocalizedRole,
             bool primaryIsInline)
         {
-            string value = input;
-            TextSelectionCache selection;
-            if (!textSelections.TryGetValue(text, out selection))
-            {
-                selection = new TextSelectionCache();
-                textSelections.Add(text, selection);
-            }
+            var context = new FontSelectionContext(
+                primaryFont,
+                role,
+                roleFont,
+                hasLocalizedRole,
+                primaryIsInline);
+            RevisionedTextSelectionCache<FontSelectionContext, TextSelectionCache> cache =
+                textSelections.GetValue(text, createTextCache);
+            return cache.Get(input, inputRevision, generation, context, analyzeText, selectTextContext);
+        }
 
-            if (selection.Matches(value, inputRevision, primaryFont, role, roleFont, hasLocalizedRole, primaryIsInline, generation))
-            {
-                return selection;
-            }
+        private static ConditionalWeakTable<
+            TMP_Text,
+            RevisionedTextSelectionCache<FontSelectionContext, TextSelectionCache>
+        > CreateTextSelections()
+        {
+            return new ConditionalWeakTable<
+                TMP_Text,
+                RevisionedTextSelectionCache<FontSelectionContext, TextSelectionCache>>();
+        }
 
-            selection.SetSource(value, inputRevision, primaryFont, generation, primaryIsInline);
-            selection.Role = role;
-            selection.RoleFont = roleFont;
-            selection.HasLocalizedRole = hasLocalizedRole;
-            selection.Profile = FontSelection.Analyze(value);
+        private static RevisionedTextSelectionCache<FontSelectionContext, TextSelectionCache> CreateTextCache(TMP_Text text)
+        {
+            return new RevisionedTextSelectionCache<FontSelectionContext, TextSelectionCache>();
+        }
+
+        private static TextSelectionCache SelectTextContext(TextScriptAnalysis analysis, FontSelectionContext context)
+        {
+            var selection = new TextSelectionCache(analysis, context);
             selection.Chinese = SelectFontForFamily(selection, ScriptFontFamily.Chinese);
             selection.Japanese = SelectFontForFamily(selection, ScriptFontFamily.Japanese);
             selection.Korean = SelectFontForFamily(selection, ScriptFontFamily.Korean);
@@ -373,22 +390,9 @@ namespace ProbablyFonts
 
         private static TMP_FontAsset SelectFontForFamily(TextSelectionCache selection, ScriptFontFamily family)
         {
-            int totalCharacters = FontSelection.CountFamilyCharacters(selection.Text, selection.Profile, family);
-            if (totalCharacters == 0) return null;
+            TextFamilyAnalysis familyAnalysis = selection.Analysis.GetFamily(family);
+            if (familyAnalysis.TotalCharacters == 0) return null;
 
-            int uniqueCount = FontSelection.CollectFamilyCodePoints(
-                selection.Text,
-                selection.Profile,
-                family,
-                codePointScratch);
-            if (uniqueCount == 0) return null;
-
-            if (codePointArray.Length != uniqueCount)
-            {
-                codePointArray = new uint[uniqueCount];
-            }
-
-            codePointScratch.CopyTo(codePointArray, 0);
             catalog.FillCjkCandidates(
                 selection.PrimaryFont,
                 selection.RoleFont,
@@ -397,62 +401,69 @@ namespace ProbablyFonts
                 family,
                 selection.Role,
                 nativeCandidateScratch);
-            faceCandidateScratch.Clear();
+            var selector = new CompleteCandidateSelector<TMP_FontAsset>(familyAnalysis, hasCharacter);
 
             for (int sourceIndex = 0; sourceIndex < nativeCandidateScratch.Count; sourceIndex++)
             {
                 TMP_FontAsset source = nativeCandidateScratch[sourceIndex];
                 if (!NativeFontCatalog.HasFontData(source)) continue;
 
+                FontWeightProfile nativeWeights;
+                TMP_FontAsset staticCopy;
                 try
                 {
-                    FontWeightProfile nativeWeights = ReadNativeWeights(source);
-                    TMP_FontAsset staticCopy = clones.GetStaticCopy(source, nativeWeights);
-                    AddUnique(faceCandidateScratch, staticCopy);
-                    if (CountCovered(staticCopy, codePointArray) == uniqueCount) break;
-                    if (source.sourceFontFile == null) continue;
-
-                    TMP_FontAsset dynamicCopy = clones.GetDynamicCopy(source, nativeWeights);
-                    if (dynamicCopy == null) continue;
-                    dynamicCopy.TryAddCharacters(codePointArray, false);
-                    AddUnique(faceCandidateScratch, dynamicCopy);
-                    if (CountCovered(dynamicCopy, codePointArray) == uniqueCount) break;
+                    nativeWeights = ReadNativeWeights(source);
+                    staticCopy = clones.GetStaticCopy(source, nativeWeights);
                 }
                 catch (Exception exception)
                 {
                     WarnAssetFailure(source, exception);
+                    continue;
                 }
+
+                if (ConsiderCandidate(ref selector, staticCopy, source)) break;
+                if (source.sourceFontFile == null) continue;
+
+                TMP_FontAsset dynamicCopy;
+                try
+                {
+                    dynamicCopy = clones.GetDynamicCopy(source, nativeWeights);
+                    if (dynamicCopy == null) continue;
+                    dynamicCopy.TryAddCharacters(familyAnalysis.CodePoints, false);
+                }
+                catch (Exception exception)
+                {
+                    WarnAssetFailure(source, exception);
+                    continue;
+                }
+
+                if (ConsiderCandidate(ref selector, dynamicCopy, source)) break;
             }
 
-            TMP_FontAsset selected = FontSelection.SelectCompleteCandidate(
-                selection.Text,
-                selection.Profile,
-                family,
-                faceCandidateScratch,
-                hasCharacter,
-                out _,
-                out int bestCoverage);
-
+            TMP_FontAsset selected = selector.Selected;
             if (selected == null)
             {
-                WarnIncompleteFace(selection.Role, family, bestCoverage, totalCharacters);
+                WarnIncompleteFace(selection.Role, family, selector.BestCoverage, familyAnalysis.TotalCharacters);
             }
 
             return selected;
         }
 
-        private static int CountCovered(TMP_FontAsset font, uint[] codePoints)
+        private static bool ConsiderCandidate(
+            ref CompleteCandidateSelector<TMP_FontAsset> selector,
+            TMP_FontAsset candidate,
+            TMP_FontAsset source)
         {
-            if (font == null) return 0;
-            int covered = 0;
-            for (int index = 0; index < codePoints.Length; index++)
+            try
             {
-                if (font.HasCharacter((int)codePoints[index])) covered++;
+                return selector.Consider(candidate);
             }
-
-            return covered;
+            catch (Exception exception)
+            {
+                WarnAssetFailure(source, exception);
+                throw;
+            }
         }
-
         private static void AddUnique(List<TMP_FontAsset> fonts, TMP_FontAsset candidate)
         {
             if (candidate == null) return;
@@ -528,17 +539,62 @@ namespace ProbablyFonts
             }
         }
 
+        private readonly struct FontSelectionContext : IEquatable<FontSelectionContext>
+        {
+            public readonly TMP_FontAsset PrimaryFont;
+            public readonly NativeFontRole Role;
+            public readonly TMP_FontAsset RoleFont;
+            public readonly bool HasLocalizedRole;
+            public readonly bool PrimaryIsInline;
+
+            public FontSelectionContext(
+                TMP_FontAsset primaryFont,
+                NativeFontRole role,
+                TMP_FontAsset roleFont,
+                bool hasLocalizedRole,
+                bool primaryIsInline)
+            {
+                PrimaryFont = primaryFont;
+                Role = role;
+                RoleFont = roleFont;
+                HasLocalizedRole = hasLocalizedRole;
+                PrimaryIsInline = primaryIsInline;
+            }
+
+            public bool Equals(FontSelectionContext other)
+            {
+                return ReferenceEquals(PrimaryFont, other.PrimaryFont) && Role == other.Role &&
+                       ReferenceEquals(RoleFont, other.RoleFont) && HasLocalizedRole == other.HasLocalizedRole &&
+                       PrimaryIsInline == other.PrimaryIsInline;
+            }
+
+            public override bool Equals(object value)
+            {
+                return value is FontSelectionContext && Equals((FontSelectionContext)value);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int hash = ReferenceEquals(PrimaryFont, null) ? 0 : RuntimeHelpers.GetHashCode(PrimaryFont);
+                    hash = (hash * 397) ^ (int)Role;
+                    hash = (hash * 397) ^ (ReferenceEquals(RoleFont, null) ? 0 : RuntimeHelpers.GetHashCode(RoleFont));
+                    hash = (hash * 397) ^ (HasLocalizedRole ? 1 : 0);
+                    return (hash * 397) ^ (PrimaryIsInline ? 1 : 0);
+                }
+            }
+        }
+
         private sealed class TextSelectionCache
         {
-            public string Text;
-            public int InputRevision;
-            public TMP_FontAsset PrimaryFont;
-            public int Generation;
-            public NativeFontRole Role;
-            public TMP_FontAsset RoleFont;
-            public bool HasLocalizedRole;
-            public bool PrimaryIsInline;
-            public TextScriptProfile Profile;
+            public readonly TextScriptAnalysis Analysis;
+            public readonly TMP_FontAsset PrimaryFont;
+            public readonly NativeFontRole Role;
+            public readonly TMP_FontAsset RoleFont;
+            public readonly bool HasLocalizedRole;
+            public readonly bool PrimaryIsInline;
+            public TextScriptProfile Profile => Analysis.Profile;
             public TMP_FontAsset Chinese;
             public TMP_FontAsset Japanese;
             public TMP_FontAsset Korean;
@@ -549,43 +605,14 @@ namespace ProbablyFonts
             private bool JapaneseBoldPrepared;
             private bool KoreanBoldPrepared;
 
-            public bool Matches(
-                string text,
-                int inputRevision,
-                TMP_FontAsset primaryFont,
-                NativeFontRole role,
-                TMP_FontAsset roleFont,
-                bool hasLocalizedRole,
-                bool primaryIsInline,
-                int generation)
+            public TextSelectionCache(TextScriptAnalysis analysis, FontSelectionContext context)
             {
-                return ReferenceEquals(Text, text) && InputRevision == inputRevision &&
-                       ReferenceEquals(PrimaryFont, primaryFont) &&
-                       Role == role && ReferenceEquals(RoleFont, roleFont) && HasLocalizedRole == hasLocalizedRole &&
-                       PrimaryIsInline == primaryIsInline && Generation == generation;
-            }
-
-            public void SetSource(
-                string text,
-                int inputRevision,
-                TMP_FontAsset primaryFont,
-                int generation,
-                bool primaryIsInline)
-            {
-                Text = text;
-                InputRevision = inputRevision;
-                PrimaryFont = primaryFont;
-                Generation = generation;
-                PrimaryIsInline = primaryIsInline;
-                Chinese = null;
-                Japanese = null;
-                Korean = null;
-                ChineseBold = null;
-                JapaneseBold = null;
-                KoreanBold = null;
-                ChineseBoldPrepared = false;
-                JapaneseBoldPrepared = false;
-                KoreanBoldPrepared = false;
+                Analysis = analysis;
+                PrimaryFont = context.PrimaryFont;
+                Role = context.Role;
+                RoleFont = context.RoleFont;
+                HasLocalizedRole = context.HasLocalizedRole;
+                PrimaryIsInline = context.PrimaryIsInline;
             }
 
             public TMP_FontAsset GetFont(ScriptFontFamily family)
@@ -598,6 +625,7 @@ namespace ProbablyFonts
                     default: return null;
                 }
             }
+
             public bool IsBoldPrepared(ScriptFontFamily family)
             {
                 switch (family)
