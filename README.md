@@ -41,6 +41,8 @@ dotnet run --project tests/ProbablyFonts.PureChecks -c Release
 dotnet build ProbablyFonts.csproj -c Release -p:GameDirectory="D:\SteamLibrary\steamapps\common\Probably Stolen"
 ```
 
+维护者发布新版本时，可按[自动发布指南](docs/releasing.md)运行脚本：更改日志手写，版本同步、构建、ZIP 打包和逐文件 SHA-512／MD5 表自动生成。
+
 ## 字体行为与边界
 
 - 尽量保留原来的字体风格。当前字体缺少某个字时，会尝试用游戏自带的其他字体补上；颜色、描边等仍跟随原控件。
